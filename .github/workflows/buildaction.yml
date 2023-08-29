@@ -6,7 +6,10 @@ jobs:
   build-android:
     name: Build for Android
     runs-on: ubuntu-latest
-
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+    
     steps:
       - name: Checkout
         uses: actions/checkout@v2
