@@ -7,9 +7,9 @@ from kivy.graphics.texture import Texture
 from kivy.uix.label import Label
 import math
 
+import cvzone
+from cvzone.FaceDetectionModule import FaceDetector
 import cv2
-
-face_cascade = cv2.CascadeClassifier('haarcascades/haarcascade_frontalface_default.xml')
 
 class CamApp(App):
     def build(self):
@@ -20,57 +20,82 @@ class CamApp(App):
         layout.add_widget(self.face_pos_label)
         layout.add_widget(self.face_distance_to_center_label)
         layout.add_widget(self.img1)
+        self.width = 320
+        self.height = 240
+        self.cam_pan = 40
+        self.cam_tilt = 20
 
         #opencv2 stuffs
         self.capture = cv2.VideoCapture(0)
-        cv2.namedWindow("CV2 Image")
+        self.detector = FaceDetector(minDetectionCon=0.5, modelSelection=0)   
         Clock.schedule_interval(self.update, 1.0/33.0)
         return layout
 
     def update(self, dt):
         # display image from cam in opencv window
-        ret, frame = self.capture.read()
-        img = frame
-        center = img.max()-img.min()
-        # convert to gray scale of each frames
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
+        
         # Detects faces of different sizes in the input image
-        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+        success, img = self.capture.read()
 
-        #for (x,y,w,h) in faces:
-            # cv2.rectangle(img,(x,y),(x+w,y+h),(0,0,255),2)
-            # roi_gray = gray[y:y+h, x:x+w]
-            # roi_color = img[y:y+h, x:x+w]
-            # print(f"X: {x}, Y: {y}")
-        if len(faces) is 1:
-            x,y,w,h = faces[0]
-            center_x, center_y = int(x+(w/2)),int(y+(h/2))
-            self.face_pos_label.text = f"{center_x}, {center_y}"
-            distance = math.dist((center_x, center_y),(center,center))
-            # self.face_distance_to_center_label.text = f"{distance}
+        # Find face mesh in the image
+        # img: Updated image with the face mesh if draw=True
+        # faces: Detected face information
+        img, bboxs = self.detector.findFaces(img, draw=False)
 
-            angle_x = center_x - center
-            angle_x = (angle_x + 180) % 360 - 180
-            angle_x = angle_x / 10
+        # Check if any face is detected
+        if bboxs:
+            # Loop through each bounding box
+            for bbox in bboxs:
+                # bbox contains 'id', 'bbox', 'score', 'center'
+
+                # ---- Get Data  ---- #
+                center = bbox["center"]
+                x, y, w, h = bbox['bbox']
+                score = int(bbox['score'][0] * 100)
+
+                # ---- Draw Data  ---- #
+                cv2.circle(img, center, 5, (255, 0, 255), cv2.FILLED)
+                cvzone.putTextRect(img, f'{score}%', (x, y - 10))
+                cvzone.cornerRect(img, (x, y, w, h))
+                cx = (x + x + w) // 2
+                cy = (y + y + h) // 2
+
+                cv2.line(img,(cx,cy),(self.width,self.height),(0,0,255),2)
+
+                distance = math.dist((cx,cy),(self.width,self.height))
+                
+                
+
+                # Correct relative to centre of image
+                turn_x  = float(x - (self.width/2))
+                turn_y  = float(y - (self.height/2))
+
+                # Convert to percentage offset
+                turn_x  /= float(self.width/2)
+                turn_y  /= float(self.height/2)
+                
+                # Scale offset to degrees (that 2.5 value below acts like the Proportional factor in PID)
+                turn_x   *= 2.5 # VFOV
+                turn_y   *= 2.5 # HFOV
+                cam_pan   = -turn_x
+                cam_tilt  = turn_y
 
 
-            angle_y = center_y - center
-            angle_y = (angle_y + 180) % 360 - 180
-            angle_y = angle_y / 10
+                # Clamp Pan/Tilt to 0 to 180 degrees
+                cam_pan = max(0,min(180,cam_pan))
+                cam_tilt = max(0,min(180,cam_tilt))
+
+                print(cam_pan, cam_tilt)
+
+                # # Update the servos
+                # pan(int(cam_pan-90))
+                # tilt(int(cam_tilt-90))
 
 
-            self.face_distance_to_center_label.text = f"{angle_x}, {angle_y}"
-
-            cv2.circle(img, (center_x, center_y),1,(0,0,255),10)
-            cv2.line(img, (center_x, center_y),(center,center),(0,0,255),10)
-
-
-        cv2.imshow("CV2 Image", frame)
         # convert it to texture
-        buf1 = cv2.flip(frame, 0)
+        buf1 = cv2.flip(img, 0)
         buf = buf1.tostring()
-        texture1 = Texture.create(size=(frame.shape[1], frame.shape[0]), colorfmt='bgr') 
+        texture1 = Texture.create(size=(img.shape[1], img.shape[0]), colorfmt='bgr') 
         #if working on RASPBERRY PI, use colorfmt='rgba' here instead, but stick with "bgr" in blit_buffer. 
         texture1.blit_buffer(buf, colorfmt='bgr', bufferfmt='ubyte')
         # display image from the texture
