@@ -1,0 +1,3 @@
+title=Face Following Camera
+author=Mahdiar Giahi
+orientation=portrait
